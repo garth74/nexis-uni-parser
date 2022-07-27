@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "nexis-uni-parser"
 version = "0.1.0"
-description = ""
+description = "Parse NexisUni rtf files into a jsonlines file."
 readme = "README.md"
 repository = "https://github.com/garth74/nexis-uni-parser"
 authors = ["Garrett Shipley <garrett.shipley7+github@gmail.com>"]
