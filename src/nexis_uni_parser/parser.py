@@ -1,3 +1,5 @@
+"""This module defines the parser."""
+
 import gzip
 import json
 import logging
@@ -10,22 +12,27 @@ from pathlib import Path
 import pandoc
 from unidecode import unidecode
 
+
 Match = re.Match[str]
 AnyMatch = Match | t.Any
 AnyMatchGenerator = t.Generator[tuple[AnyMatch, AnyMatch, AnyMatch], None, None]
 ErrorOptions = t.Union[t.Literal["ignore"], t.Literal["strict"]]
+AnyDict = t.Dict[str, t.Any]
+Records = t.List[AnyDict]
 
 
 class AlreadyParsedError(Exception):
     """This text has already been parsed or a file with the exact same content has been parsed."""
 
 
-def _getid(text: str):
+def _getid(text: str) -> str:
     """Creates a unique id using the md5 algorithm."""
-    return md5(text.encode("utf-8")).hexdigest()
+    return md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
-def _neighborhood(iterable: t.Iterable[Match], next_default: t.Any = None) -> AnyMatchGenerator:
+def _neighborhood(
+    iterable: t.Iterable[Match], next_default: t.Any = None
+) -> AnyMatchGenerator:
     """Loop through an iterable yielding its previous and following item."""
     iterator = iter(iterable)
     prev_item = None
@@ -54,26 +61,30 @@ class Parser:
         ("{prefix}_Job_Number", r"(Job Number):?"),
         ("{prefix}_Body", r"(Body)"),
     ]
-    patterns: dict[str, re.Pattern[str]] = {}
+    patterns: t.Dict[str, re.Pattern[str]] = {}
 
     def __init__(self):
+        """Create a new parser class."""
         self._pattern = None
         self._parsed: set[str] = set()
 
-    def get_pattern(self, prefix: str):
+    def get_pattern(self, prefix: str) -> re.Pattern[str]:
         """Get a compiled regular expression given a prefix."""
         if prefix not in self.patterns:
-            sections = [(desc.format(prefix=prefix), pattern) for desc, pattern in self._sections]
+            sections = [
+                (desc.format(prefix=prefix), pattern)
+                for desc, pattern in self._sections
+            ]
             pattern = "|".join(r"(?P<%s>%s)" % pair for pair in sections)
             self.patterns[prefix] = re.compile(pattern, flags=re.IGNORECASE)
         return self.patterns[prefix]
 
-    def parse_key_value_pairs(self, prefix: str, raw_text: str):
+    def parse_key_value_pairs(self, prefix: str, raw_text: str) -> AnyDict:
         """Parse key value pairs from the nexis uni raw text.
 
         Creates a dictioanry of key value pairs from instances of r"(.*):(.*)"
         """
-        sections: dict[t.Any, t.Any] = {f"{prefix}_raw_text": raw_text}
+        sections: t.Dict[t.Any, t.Any] = {f"{prefix}_raw_text": raw_text}
         pattern = self.get_pattern(prefix)
         matches = pattern.finditer(raw_text)
         for _, mo, next_mo in _neighborhood(matches):
@@ -92,14 +103,16 @@ class Parser:
 
         return sections
 
-    def _check_parsed(self, raw_text: str, errors: ErrorOptions):
+    def _check_parsed(self, raw_text: str, errors: ErrorOptions) -> None:
         id_ = _getid(raw_text)
         if id_ in self._parsed:
             if errors == "strict":
-                raise AlreadyParsedError("To remove this error, make sure the `errors` parameter is set to 'ignore'.")
+                raise AlreadyParsedError(
+                    "To remove this error, make sure the `errors` parameter is set to 'ignore'."
+                )
         self._parsed.add(id_)
 
-    def parse(self, raw_text: str, errors: ErrorOptions):
+    def parse(self, raw_text: str, errors: ErrorOptions) -> Records:
         """Parses the contents of a downloaded Nexis Uni file."""
         # Make sure the data is unicode
         text = unidecode(raw_text).strip()
@@ -121,16 +134,24 @@ class Parser:
         # Parse the key value pairs
         tocs_ = map(self.parse_key_value_pairs, repeat("toc"), tocs)
         articles_ = map(self.parse_key_value_pairs, repeat("article"), articles)
-        return [{**job_metadata, **toc_data, **article_data} for toc_data, article_data in zip(tocs_, articles_)]
+        return [
+            {**job_metadata, **toc_data, **article_data}
+            for toc_data, article_data in zip(tocs_, articles_)
+        ]
 
-    def _parse_file(self, file: Path | str, errors: ErrorOptions):
-        doc = pandoc.read(file=Path(file).as_posix())  # type: ignore
-        plain_text = pandoc.write(doc, options=["--to", "plain"])  # type: ignore
+    def _parse_file(self, file: Path | str, errors: ErrorOptions) -> Records:
+        doc: t.Any = pandoc.read(file=Path(file).as_posix())
+        plain_text: t.Any = pandoc.write(doc, options=["--to", "plain"])
         return self.parse(plain_text, errors)
 
-    def parse_file(self, file: Path | str, errors: ErrorOptions = "strict"):
+    def parse_file(
+        self, file: Path | str, errors: ErrorOptions = "strict"
+    ) -> t.Generator[t.Optional[AnyDict], None, None]:
         """Parse a nexis uni file."""
-        assert errors in {"strict", "ignore"}, "`errors` parameter must be either 'strict' or 'ignore'"
+        if errors not in {"strict", "ignore"}:
+            raise ValueError(
+                f"`errors` parameter must be either 'strict' or 'ignore' but received {errors}"
+            )
         self.logger.info(f"Parsing {Path(file).name}")
         try:
             yield from self._parse_file(file, errors)
@@ -139,7 +160,12 @@ class Parser:
                 raise e
             yield None
 
-    def parse_directory(self, directory: str | Path, errors: ErrorOptions = "ignore", recursive: bool = False):
+    def parse_directory(
+        self,
+        directory: str | Path,
+        errors: ErrorOptions = "ignore",
+        recursive: bool = False,
+    ) -> t.Generator[t.Optional[AnyDict], None, None]:
         """Parse all the .rtf nexis uni files in a directory."""
         self.logger.info(f"Parsing contents of {directory}")
         path = Path(directory)
@@ -148,14 +174,14 @@ class Parser:
             yield from self.parse_file(file, errors=errors)
 
 
-def convert_rtf_to_plain_text(rtf_file: Path | str):
+def convert_rtf_to_plain_text(rtf_file: Path | str) -> Path:
     """Create a plain text file from an RTF file.
 
     Uses the same name as the original file, changing only the extension.
     """
     rtf_file = Path(rtf_file)
-    doc = pandoc.read(file=rtf_file.as_posix())  # type: ignore
-    plain_text = pandoc.write(doc, options=["--to", "plain"])  # type: ignore
+    doc: t.Any = pandoc.read(file=rtf_file.as_posix())
+    plain_text: t.Any = pandoc.write(doc, options=["--to", "plain"])
     new_file = rtf_file.with_suffix(".txt")
     new_file.write_text(plain_text, errors="ignore")
     return new_file
@@ -166,7 +192,7 @@ def parse(
     output_filepath: t.Optional[Path | str] = None,
     recursive: bool = False,
     errors: ErrorOptions = "ignore",
-):
+) -> Path:
     """Parse a file or directory. The result is a compressed json lines file."""
     inpath = Path(inputpath)
     outpath = Path(output_filepath or inpath.with_suffix("jsonl.gz"))
