@@ -16,6 +16,8 @@ Changelog = "https://github.com/garth74/nexis-uni-parser/releases"
 [tool.poetry.dependencies]
 python = "^3.7"
 click = ">=8.0.1"
+Unidecode = "^1.3.4"
+typer = "^0.6.1"
 
 [tool.poetry.dev-dependencies]
 Pygments = ">=2.10.0"

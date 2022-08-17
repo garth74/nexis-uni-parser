@@ -1,17 +1,10 @@
-"""Test cases for the __main__ module."""
-import pytest
-from click.testing import CliRunner
+from pathlib import Path
 
-from nexis_uni_parser import __main__
+from nexis_uni_parser import parse
 
 
-@pytest.fixture
-def runner() -> CliRunner:
-    """Fixture for invoking command-line interfaces."""
-    return CliRunner()
-
-
-def test_main_succeeds(runner: CliRunner) -> None:
-    """It exits with a status code of zero."""
-    result = runner.invoke(__main__.main)
-    assert result.exit_code == 0
+def test_parser(tmp_path: Path) -> None:
+    d = tmp_path / "sub"
+    d.mkdir()
+    outpath = d / "name"
+    parse(Path(__file__).parent.joinpath("Files(100).RTF"), outpath)

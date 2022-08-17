@@ -4,12 +4,13 @@ import gzip
 import json
 import logging
 import re
+import shutil
+import subprocess
 import typing as t
 from hashlib import md5
 from itertools import repeat
 from pathlib import Path
 
-import pandoc
 from unidecode import unidecode
 
 
@@ -42,6 +43,22 @@ def _neighborhood(
         prev_item = current_item
         current_item = next_item
     yield (prev_item, current_item, None)
+
+
+def _check_pandoc_installed() -> bool:
+    """Make sure pandoc can be found."""
+    return shutil.which("pandoc") is not None
+
+
+def _pandoc_convert_rtf_to_plain(path: Path) -> str:
+    """Convert RTF file text to plaintext."""
+    if not _check_pandoc_installed():
+        raise FileNotFoundError("``pandoc`` executable could not be found.")
+
+    text = path.read_text()
+    args = ["pandoc", "--from", "rtf", "--to", "plain"]
+    proc = subprocess.run(args, input=text, text=True, capture_output=True)
+    return proc.stdout
 
 
 class Parser:
@@ -140,8 +157,7 @@ class Parser:
         ]
 
     def _parse_file(self, file: Path | str, errors: ErrorOptions) -> Records:
-        doc: t.Any = pandoc.read(file=Path(file).as_posix())
-        plain_text: t.Any = pandoc.write(doc, options=["--to", "plain"])
+        plain_text = _pandoc_convert_rtf_to_plain(Path(file))
         return self.parse(plain_text, errors)
 
     def parse_file(
@@ -180,8 +196,7 @@ def convert_rtf_to_plain_text(rtf_file: Path | str) -> Path:
     Uses the same name as the original file, changing only the extension.
     """
     rtf_file = Path(rtf_file)
-    doc: t.Any = pandoc.read(file=rtf_file.as_posix())
-    plain_text: t.Any = pandoc.write(doc, options=["--to", "plain"])
+    plain_text = _pandoc_convert_rtf_to_plain(rtf_file)
     new_file = rtf_file.with_suffix(".txt")
     new_file.write_text(plain_text, errors="ignore")
     return new_file
