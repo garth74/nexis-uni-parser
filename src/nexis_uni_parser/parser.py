@@ -5,7 +5,8 @@ import json
 import logging
 import re
 import shutil
-import subprocess
+import subprocess  # noqa: S404
+import sys
 import typing as t
 from hashlib import md5
 from itertools import repeat
@@ -14,12 +15,27 @@ from pathlib import Path
 from unidecode import unidecode
 
 
-Match = re.Match[str]
-AnyMatch = Match | t.Any
-AnyMatchGenerator = t.Generator[tuple[AnyMatch, AnyMatch, AnyMatch], None, None]
-ErrorOptions = t.Union[t.Literal["ignore"], t.Literal["strict"]]
+if sys.version_info.major < 3 and sys.version_info.minor < 7:
+    raise Exception("Must be using Python 3.7")
+
+if sys.version_info.minor > 7:
+    ErrorOptions = t.Union[t.Literal["ignore"], t.Literal["strict"]]
+else:
+    from typing_extensions import Literal
+
+    ErrorOptions = t.Union[Literal["ignore"], Literal["strict"]]
+
+if sys.version_info.minor > 9:
+    Match = t.Match[str]
+else:
+    Match = t.Match  # type: ignore[misc]
+
+AnyMatch = t.Union[Match, t.Any]
+AnyMatchGenerator = t.Generator[t.Tuple[AnyMatch, AnyMatch, AnyMatch], None, None]
+
 AnyDict = t.Dict[str, t.Any]
 Records = t.List[AnyDict]
+PathLike = t.Union[str, Path]
 
 
 class AlreadyParsedError(Exception):
@@ -28,7 +44,7 @@ class AlreadyParsedError(Exception):
 
 def _getid(text: str) -> str:
     """Creates a unique id using the md5 algorithm."""
-    return md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return md5(text.encode("utf-8")).hexdigest()  # noqa: S303
 
 
 def _neighborhood(
@@ -57,8 +73,9 @@ def _pandoc_convert_rtf_to_plain(path: Path) -> str:
 
     text = path.read_text()
     args = ["pandoc", "--from", "rtf", "--to", "plain"]
-    proc = subprocess.run(args, input=text, text=True, capture_output=True)
-    return proc.stdout
+    kwargs = {"input": text, "text": True, "capture_output": True}
+    proc = subprocess.run(args, **kwargs)  # noqa: S603
+    return t.cast(str, proc.stdout)
 
 
 class Parser:
@@ -78,14 +95,14 @@ class Parser:
         ("{prefix}_Job_Number", r"(Job Number):?"),
         ("{prefix}_Body", r"(Body)"),
     ]
-    patterns: t.Dict[str, re.Pattern[str]] = {}
+    patterns: t.Dict[str, t.Pattern[str]] = {}
 
     def __init__(self):
         """Create a new parser class."""
         self._pattern = None
-        self._parsed: set[str] = set()
+        self._parsed: t.Set[str] = set()
 
-    def get_pattern(self, prefix: str) -> re.Pattern[str]:
+    def get_pattern(self, prefix: str) -> t.Pattern[str]:
         """Get a compiled regular expression given a prefix."""
         if prefix not in self.patterns:
             sections = [
@@ -156,12 +173,12 @@ class Parser:
             for toc_data, article_data in zip(tocs_, articles_)
         ]
 
-    def _parse_file(self, file: Path | str, errors: ErrorOptions) -> Records:
+    def _parse_file(self, file: PathLike, errors: ErrorOptions) -> Records:
         plain_text = _pandoc_convert_rtf_to_plain(Path(file))
         return self.parse(plain_text, errors)
 
     def parse_file(
-        self, file: Path | str, errors: ErrorOptions = "strict"
+        self, file: PathLike, errors: ErrorOptions = "strict"
     ) -> t.Generator[t.Optional[AnyDict], None, None]:
         """Parse a nexis uni file."""
         if errors not in {"strict", "ignore"}:
@@ -178,7 +195,7 @@ class Parser:
 
     def parse_directory(
         self,
-        directory: str | Path,
+        directory: PathLike,
         errors: ErrorOptions = "ignore",
         recursive: bool = False,
     ) -> t.Generator[t.Optional[AnyDict], None, None]:
@@ -190,7 +207,7 @@ class Parser:
             yield from self.parse_file(file, errors=errors)
 
 
-def convert_rtf_to_plain_text(rtf_file: Path | str) -> Path:
+def convert_rtf_to_plain_text(rtf_file: PathLike) -> Path:
     """Create a plain text file from an RTF file.
 
     Uses the same name as the original file, changing only the extension.
@@ -203,8 +220,8 @@ def convert_rtf_to_plain_text(rtf_file: Path | str) -> Path:
 
 
 def parse(
-    inputpath: Path | str,
-    output_filepath: t.Optional[Path | str] = None,
+    inputpath: PathLike,
+    output_filepath: t.Optional[PathLike] = None,
     recursive: bool = False,
     errors: ErrorOptions = "ignore",
 ) -> Path:
